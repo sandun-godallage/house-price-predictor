@@ -1,6 +1,6 @@
 /* Design Tokens (Variables) */
 :root {
-    --bg-gradient: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+    --bg-gradient: linear-gradient(135deg, #202038, #303a55, #0f3460);
     --glass-bg: rgba(255, 255, 255, 0.05);
     --glass-border: rgba(255, 255, 255, 0.1);
     --input-bg: rgba(255, 255, 255, 0.08);

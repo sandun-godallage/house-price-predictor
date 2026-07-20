@@ -1,7 +1,7 @@
-# ============================================
-# House Price Predictor — ML Model
-# Author: Sandun Godallage
-# ============================================
+# =====================================================================
+# Industrial House Price Predictor — Enterprise ML Pipeline
+# Author: Sandun Godallage (Refactored to Production-Grade Pipeline)
+# =====================================================================
 
 import argparse
 import json
@@ -9,14 +9,16 @@ import os
 import numpy as np
 import pandas as pd
 import joblib
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.datasets import fetch_california_housing
 
-MODEL_PATH = "house_price_model.joblib"
+MODEL_PATH = "industrial_house_model.joblib"
 
-# Model එකට input වෙන්න ඕනේ නිවැරදිම Feature Order එක
+#   Feature  (Order)
 FEATURES = [
     "MedInc", "HouseAge", "AveRooms", "AveBedrms", 
     "Population", "AveOccup", "Latitude", "Longitude"
@@ -26,126 +28,138 @@ _HOUSING_CACHE = None
 
 
 def create_data():
-    """Real-world California Housing dataset load කරනවා"""
+    """Real-world California Housing dataset එක memory cache එකක් සහිතව load කරයි"""
     global _HOUSING_CACHE
     if _HOUSING_CACHE is None:
-        housing = fetch_california_housing(as_frame=False)
-        data = np.column_stack([housing.data, housing.target])
-        columns = list(housing.feature_names) + ["price"]
-        df = pd.DataFrame(data, columns=columns)
+        # Dataset  Pandas DataFrame 
+        housing = fetch_california_housing(as_frame=True)
+        df = housing.frame.copy()
+        df = df.rename(columns={"MedHouseVal": "price"})
         _HOUSING_CACHE = df
     return _HOUSING_CACHE
 
 
+def build_industrial_pipeline():
+    """Data ordering කතුර සහ AI මොළය එකට එකලස් කර Pipeline එක සාදයි"""
+    # 1. Preprocessor: , FEATURES  Auto 
+    #  Columns  Auto Drop (Drop remainder) 
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("feature_order_lock", "passthrough", FEATURES)
+        ],
+        remainder="drop"
+    )
+
+    # 2. Complete Pipeline Assembly
+    pipeline = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("regressor", GradientBoostingRegressor(
+            n_estimators=300,
+            learning_rate=0.05,
+            max_depth=4,
+            random_state=42
+        ))
+    ])
+    return pipeline
+
+
 def train_model():
-    """Model train කරනවා (Gradient Boosting)"""
+    """මුළු Pipeline එකම එකවර Train කර Accuracy පරීක්ෂා කරයි"""
     df = create_data()
 
-    #FEATURES list එකේ තියෙන order එකටම X data ටික ගන්නවා
-    X = df[FEATURES]
+    # Raw Data  X  Y  (Pipeline order )
+    X = df.drop(columns=["price"])
     y = df["price"]
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, shuffle=True
     )
 
-    model = GradientBoostingRegressor(
-        n_estimators=300,
-        learning_rate=0.05,
-        max_depth=4,
-        random_state=42,
-    )
-    model.fit(X_train, y_train)
+    pipeline = build_industrial_pipeline()
+    
+    print("Training the Industrial Beast Pipeline...")
+    #  Data Ordering  Model Training !
+    pipeline.fit(X_train, y_train)
 
-    # Accuracy check
-    predictions = model.predict(X_test)
+    # Accuracy Checks
+    predictions = pipeline.predict(X_test)
     mae = mean_absolute_error(y_test, predictions)
     r2 = r2_score(y_test, predictions)
-    print(f"Model trained! MAE: {round(mae, 4)} (${round(mae * 100000, 0):,.0f})")
-    print(f"R2 Score: {round(r2, 4)}")
+    
+    print(f"\n[+] Model Trained Successfully!")
+    print(f"    - MAE: {round(mae, 4)} (${round(mae * 100000, 0):,.0f})")
+    print(f"    - R2 Score: {round(r2, 4)}")
 
-    return model
+    return pipeline
 
 
 def save_model(model, path: str = MODEL_PATH):
-    """Trained model eka disk ekata save කරනවා"""
+    """මුළු Pipeline එකම එක ගුලියක් ලෙස Disk එකට Save කරයි"""
     joblib.dump(model, path)
-    print(f"Model saved to {path}")
+    print(f"[+] Pipeline saved safely to '{path}'")
 
 
 def load_model(path: str = MODEL_PATH):
-    """Disk eken model eka load කරනවා. File එක නැත්නම් auto-train කරනවා."""
+    """Disk එකෙන් Pipeline එක load කරයි. නැත්නම් Auto-Train වෙයි."""
     if not os.path.exists(path):
-        print(f"Model file '{path}' not found. Training a new model first...")
+        print(f"[-] Model file '{path}' not found. Initializing Auto-Train...")
         model = train_model()
         save_model(model, path)
         return model
     return joblib.load(path)
 
 
-def predict_price(model, medinc, houseage, averooms, averageoccupation,
+def predict_price(pipeline, medinc, houseage, averooms, averageoccupation,
                   latitude, longitude, population, avebedrms):
-    """Price predict කරනවා"""
+    """ඕනෑම පිළිවෙලකට එන දත්ත Pipeline එක හරහා ගලපා නිවාස මිල ගණනය කරයි"""
     
-    # පරාමිතීන් (arguments) pass කරපු order එකට නෙමෙයි, 
-    # FEATURES list එකේ තියෙන order එකටම values ටික map කරගන්නවා.
-    input_dict = {
+    # ලැබෙන දත්ත Dictionary එකකට දමා DataFrame එකක් සාදයි
+    raw_input = pd.DataFrame([{
         "MedInc": medinc, "HouseAge": houseage, "AveRooms": averooms,
         "AveOccup": averageoccupation, "Latitude": latitude, "Longitude": longitude,
         "Population": population, "AveBedrms": avebedrms
-    }
-    
-    values = [input_dict[f] for f in FEATURES]
+    }])
 
-    for name, v in zip(FEATURES, values):
-        if v is None:
-            raise ValueError(f"{name} must be provided (got None)")
-        try:
-            float(v)
-        except (TypeError, ValueError):
-            raise ValueError(f"{name} must be a number, got {v!r}")
-
-    input_data = pd.DataFrame(
-        [[float(v) for v in values]],
-        columns=FEATURES,
-        index=[0],
-    )
-    
-    price = model.predict(input_data)
+    # කිසිදු manual ordering එකක් අවශ්‍ය නැත; Pipeline එක විසින් එය බලාගනී!
+    price = pipeline.predict(raw_input)
     return round(float(price[0]) * 100000, 2)
 
 
-def feature_importance(model):
-    """Feature importance (කොහොමද හෙද්දි price ලං කරයි)"""
-    importances = model.feature_importances_
+def feature_importance(pipeline):
+    """මොඩල් එකේ මිල තීරණය කිරීමට වැඩිපුරම බලපෑ සාධක පෙන්වයි"""
+    # Pipeline එක ඇතුළෙන් Regressor එක සහ Preprocessor එක වෙනම ගලවා ගනී
+    regressor = pipeline.named_steps["regressor"]
+    importances = regressor.feature_importances_
+    
     table = (
-        pd.DataFrame({"feature": model.feature_names_in_, "importance": importances})
+        pd.DataFrame({"feature": FEATURES, "importance": importances})
         .sort_values("importance", ascending=False)
         .reset_index(drop=True)
     )
     return table
 
 
-def evaluate_model(model):
-    """Test set metrics return කරනවා"""
+def evaluate_model(pipeline):
+    """පරීක්ෂණ දත්ත (Test set) මත Metrics ගණනය කරයි"""
     df = create_data()
-    X = df[FEATURES]
+    X = df.drop(columns=["price"])
     y = df["price"]
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, shuffle=True
-    )
-    preds = model.predict(X_test)
+    
+    _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    preds = pipeline.predict(X_test)
+    
     return {
-        "mae": round(mean_absolute_error(y_test, preds) * 100000, 2),
-        "r2": round(r2_score(y_test, preds), 4),
+        "mae_dollars": round(mean_absolute_error(y_test, preds) * 100000, 2),
+        "r2_score": round(r2_score(y_test, preds), 4),
     }
 
 
 def _run_cli():
-    parser = argparse.ArgumentParser(description="House Price Predictor")
+    """Terminal (CLI) එක හරහා විධාන ක්‍රියාත්මක කිරීමේ කොටස"""
+    parser = argparse.ArgumentParser(description="Industrial House Price Predictor CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("train", help="Train and save the model")
+    sub.add_parser("train", help="Train and save the pipeline")
 
     pred = sub.add_parser("predict", help="Predict a price from features")
     pred.add_argument("--medinc", type=float, required=True)
@@ -166,21 +180,21 @@ def _run_cli():
         model = train_model()
         save_model(model)
     elif args.command == "predict":
-        model = load_model()
+        pipeline = load_model()
         price = predict_price(
-            model,
+            pipeline,
             medinc=args.medinc, houseage=args.houseage,
             averooms=args.averooms, averageoccupation=args.averageoccupation,
             latitude=args.latitude, longitude=args.longitude,
             population=args.population, avebedrms=args.avebedrms,
         )
-        print(json.dumps({"predicted_price": price}, indent=2))
+        print(json.dumps({"predicted_price_usd": price}, indent=2))
     elif args.command == "importance":
-        model = load_model()
-        print(feature_importance(model).to_string(index=False))
+        pipeline = load_model()
+        print(feature_importance(pipeline).to_string(index=False))
     elif args.command == "evaluate":
-        model = load_model()
-        print(json.dumps(evaluate_model(model), indent=2))
+        pipeline = load_model()
+        print(json.dumps(evaluate_model(pipeline), indent=2))
 
 
 if __name__ == "__main__":
